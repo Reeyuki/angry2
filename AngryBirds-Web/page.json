@@ -1,0 +1,40 @@
+{
+ "title": "Angry Birds",
+ "credit": {
+  "text": "Port By Reeyuki",
+  "link_text": "reeyuki.neocities.org",
+  "url": "https://reeyuki.neocities.org",
+  "corner": "tl"
+ },
+ "packs": {
+  "target_mb": 4,
+  "boot_mb": 4,
+  "index": "packs/index.b497432c04.json",
+  "count": 59,
+  "bytes": 206587062
+ },
+ "resolution": {
+  "default": "1280x720",
+  "presets": [
+   "800x450",
+   "960x540",
+   "1024x600",
+   "1280x720",
+   "1600x900",
+   "1920x1080"
+  ],
+  "auto": true,
+  "patch": {
+   "config.lua": [
+    [
+     "width = 1024",
+     "width = {w}"
+    ],
+    [
+     "height = 600",
+     "height = {h}"
+    ]
+   ]
+  }
+ }
+}

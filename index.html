@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Angry Ports — classic Angry Birds, ported to your browser.">
+    <title>Angry Ports</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #0a0a10;
+            color: #e8e8f2;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            font-size: 15px;
+            letter-spacing: .35em;
+            text-transform: uppercase;
+            color: #8b8ba3;
+            padding: 28px 16px 10px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 200px));
+            gap: 28px 22px;
+            justify-content: center;
+            padding: 24px 20px 48px;
+            width: 100%;
+            max-width: 1100px;
+        }
+        .game {
+            text-decoration: none;
+            color: inherit;
+            text-align: center;
+            transition: transform .15s ease;
+        }
+        .game:hover { transform: translateY(-4px) scale(1.03); }
+        .game-title {
+            display: block;
+            font-size: 16.5px;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+            color: #8b8ba3;
+            margin-top: 4px;
+        }
+        .game img {
+            width: 100%;
+            aspect-ratio: 219 / 262;
+            object-fit: cover;
+            border-radius: 12px;
+            background: #15151f;
+            box-shadow: 0 10px 30px rgba(0,0,0,.6);
+        }
+        footer {
+            margin-top: auto;
+            padding: 16px;
+            font-size: 11px;
+            color: #55556b;
+        }
+        .overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: #05050a;
+            display: none;
+            flex-direction: column;
+        }
+        .overlay.active { display: flex; }
+        .overlay-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 16px;
+            background: #12121c;
+            border-bottom: 1px solid #23233a;
+        }
+        .overlay-bar span {
+            font-size: 12px;
+            letter-spacing: .15em;
+            text-transform: uppercase;
+            color: #9b9bb8;
+        }
+        .overlay-close {
+            background: #23233a;
+            color: #e8e8f2;
+            border: none;
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        .overlay-close:hover { background: #2e2e4a; }
+        .overlay-frame {
+            flex: 1;
+            width: 100%;
+            border: 0;
+            background: #121212;
+        }
+    </style>
+  <!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "ba7e8d1adbd942c7abd27e23c08776ea"}'></script><!-- End Cloudflare Web Analytics -->
+</head>
+
+<body>
+
+<h1>Angry Ports</h1>
+
+<main class="grid">
+
+    <a class="game" href="./AngryBirdsSpace-Web/">
+        <img src="https://giantbomb.com/a/uploads/scale_super/8/87790/2383158-box_abs.png"
+             onerror="this.onerror=null;this.src='https://cdn.cloudflare.steamstatic.com/steam/apps/210550/header.jpg'"
+             crossorigin="anonymous"
+             width="219" height="262" loading="lazy">
+        <span class="game-title">Angry Birds Space</span>
+    </a>
+
+    <a class="game" href="./AngryBirds-Web/">
+        <img src="./angrybirds-box.png"
+             alt="Angry Birds" width="219" height="262" loading="lazy">
+        <span class="game-title">Angry Birds</span>
+    </a>
+
+    <a class="game" href="./AngryBirdsRio-Web/">
+        <img src="./angrybirds-rio-box.jpg"
+             alt="Angry Birds Rio" width="219" height="262" loading="lazy">
+        <span class="game-title">Angry Birds Rio</span>
+    </a>
+
+    <a class="game" href="./AngryBirdsSeasons-Web/">
+        <img src="./angrybirds-seasons-box.jpg"
+             alt="Angry Birds Seasons" width="219" height="262" loading="lazy">
+        <span class="game-title">Angry Birds Seasons</span>
+    </a>
+
+    <a class="game" href="./AngryBirdsStarWars1-Web/">
+        <img src="./angrybirds-starwars-box.jpg"
+             alt="Angry Birds Star Wars" width="219" height="262" loading="lazy">
+        <span class="game-title">Angry Birds Star Wars</span>
+    </a>
+
+    <a class="game" href="./AngryBirdsStarWarsII-Web/">
+        <img src="./angrybirds-starwars2-box.jpg"
+             alt="Angry Birds Star Wars II" width="219" height="262" loading="lazy">
+        <span class="game-title">Angry Birds Star Wars II</span>
+    </a>
+
+    <a class="game" id="ab2Link" href="./?game=ab2" data-frame="https://cdn.jsdelivr.net/gh/NaoTomori1/AngryBirds2@main/index.html">
+        <img src="./angrybirds2-box.webp"
+             alt="Angry Birds 2" width="219" height="262" loading="lazy">
+        <span class="game-title">Angry Birds 2</span>
+    </a>
+
+</main>
+
+<footer>Ports by Reeyuki.</footer>
+
+<div class="overlay" id="ab2Overlay" role="dialog" aria-label="Angry Birds 2">
+    <div class="overlay-bar">
+        <span>Angry Birds 2</span>
+        <button class="overlay-close" id="ab2Close" aria-label="Close">&times;</button>
+    </div>
+    <iframe class="overlay-frame" id="ab2Frame" title="Angry Birds 2" allow="autoplay; fullscreen; gamepad"></iframe>
+</div>
+
+<script>
+    // Only cards with data-frame (or Star Wars 1) open in the in-page overlay
+    // iframe; every other card is a normal link that opens its own page.
+    
+    (function () {
+        // Set up overlay click handling for all game links
+        var gameLinks = document.querySelectorAll('.grid .game');
+        var overlay = document.getElementById('ab2Overlay');
+        var frame = document.getElementById('ab2Frame');
+        var closeBtn = document.getElementById('ab2Close');
+        var blobUrl = null;
+
+        // Function to open a game in the overlay using fetch-first blob approach
+        function openGameInOverlay(gameUrl, fallbackUrl) {
+            blobUrl = null; // Reset previous blob
+
+            overlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
+
+            if (blobUrl) {
+                URL.revokeObjectURL(blobUrl);
+                blobUrl = null;
+            }
+
+            // Local games (relative paths) load directly; only remote ones use the blob trick.
+            if (!/^https?:/i.test(gameUrl)) {
+                frame.src = gameUrl;
+                return;
+            }
+
+            // Fetch the page first, then load it into the iframe as a blob URL
+            // so it runs inside this site instead of navigating away.
+            fetch(gameUrl)
+                .then(function (response) {
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    return response.text();
+                })
+                .then(function (html) {
+                    // Determine the directory from the URL
+                    var dir = gameUrl.slice(0, gameUrl.lastIndexOf('/') + 1);
+
+                    // Absolutize root-relative Unity asset paths so they
+                    // survive moving into a blob: document.
+                    html = html.replace(
+                        /(\+\s*)?(['"])\/(Build\/|StreamingAssets\/|TemplateData\/)/g,
+                        function (m, plus, q, p) { return plus ? m : q + dir + p; }
+                    );
+                    if (/<head[^>]*>/i.test(html)) {
+                        html = html.replace(/<head[^>]*>/i, function (m) {
+                            return m + '<base href="' + dir + '">';
+                        });
+                    } else {
+                        html = '<base href="' + dir + '">' + html;
+                    }
+                    blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+                    frame.src = blobUrl;
+                })
+                .catch(function (err) {
+                    // Remote copy unavailable: load the local copy of the game instead.
+                    console.warn('Remote load failed, using local copy:', err);
+                    frame.src = fallbackUrl || gameUrl;
+                });
+        }
+
+        // Open game in overlay and prevent default link navigation
+        gameLinks.forEach(function (link) {
+            link.addEventListener('click', function (e) {
+                if (e.ctrlKey || e.metaKey || e.shiftKey || e.button) return; // let the browser open a new tab/window
+                var href = link.getAttribute('href');
+                var target = link.dataset.frame || (href.includes('AngryBirdsStarWars1-Web/') ? href : null);
+                if (!target) return; // normal navigation to the game's own page
+                e.preventDefault();
+                openGameInOverlay(target, href);
+            });
+        });
+
+        // Close game overlay
+        function closeGame() {
+            overlay.classList.remove('active');
+            document.body.style.overflow = '';
+            frame.src = 'about:blank';
+            if (blobUrl) {
+                URL.revokeObjectURL(blobUrl);
+                blobUrl = null;
+            }
+        }
+
+        // Deep link: ./?game=ab2 (middle-click / new tab) opens the overlay on load
+        if (/[?&]game=ab2\b/.test(location.search)) {
+            openGameInOverlay(document.getElementById('ab2Link').dataset.frame, './');
+        }
+
+        closeBtn.addEventListener('click', closeGame);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && overlay.classList.contains('active')) closeGame();
+        });
+    })();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,39 @@
+{
+ "title": "Angry Birds Star Wars II",
+ "credit": {
+  "text": "Port By Reeyuki",
+  "link_text": "reeyuki.neocities.org",
+  "url": "https://reeyuki.neocities.org",
+  "corner": "tl"
+ },
+ "packs": {
+  "target_mb": 4,
+  "boot_mb": 4,
+  "index": "packs/index.fa97b1d3e8.json",
+  "count": 45,
+  "bytes": 169925658
+ },
+ "resolution": {
+  "default": "1280x720",
+  "presets": [
+   "800x450",
+   "960x540",
+   "1280x720",
+   "1600x900",
+   "1920x1080"
+  ],
+  "auto": false,
+  "patch": {
+   "config.lua": [
+    [
+     "width = 1280",
+     "width = {w}"
+    ],
+    [
+     "height = 720",
+     "height = {h}"
+    ]
+   ]
+  }
+ }
+}

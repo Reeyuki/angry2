@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Angry Birds Star Wars</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #000; color: #ccc; font: 14px sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #stage { width: 940px; height: 570px; max-width: 100vw; }
+  ruffle-embed, embed { display: block; }
+  #stage:fullscreen { width: 100vw; height: 100vh; background: #000; }
+  #stage:fullscreen ruffle-embed, #stage:fullscreen embed { width: 100% !important; height: 100% !important; }
+  footer { margin-top: 12px; display: flex; gap: 16px; align-items: center; }
+  #fs { background: #222; color: #ffb347; border: 1px solid #555; border-radius: 6px; padding: 4px 12px; cursor: pointer; font: inherit; }
+  #fs:hover { background: #333; }
+  footer a { color: #ffb347; text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+<script src="fb_sdk_mock.js"></script>
+<script src="ruffle/ruffle.js"></script>
+  <!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "ba7e8d1adbd942c7abd27e23c08776ea"}'></script><!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+<div id="stage">
+  <embed src="game/AngryBirdsBlackFacebook.swf" width="940" height="570"
+         flashvars="assetsUrl=game/" quality="high" bgcolor="#000000"
+         allowscriptaccess="sameDomain" allowfullscreen="true" wmode="direct">
+</div>
+<footer><button id="fs" type="button">Fullscreen</button>Port By <a href="https://reeyuki.neocities.org" target="_blank" rel="noopener">Reeyuki</a></footer>
+<script>
+document.getElementById('fs').addEventListener('click', function () {
+  var el = document.getElementById('stage');
+  var req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (document.fullscreenElement) document.exitFullscreen(); else if (req) req.call(el);
+});
+</script>
+</body>
+</html>

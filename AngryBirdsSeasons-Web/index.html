@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <script src="coi.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Game</title>
+    <link rel="icon" href="data:,">
+    <style>
+        html, body { margin: 0; height: 100%; background: #000; color: #ddd; font-family: system-ui, sans-serif; overflow: hidden; }
+        #stage { position: fixed; left: 0; right: 0; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; }
+        #canvas.playing { cursor: none; }
+        #canvas { max-width: 100%; max-height: 100%; object-fit: contain; background: #000; outline: none; image-rendering: auto; }
+        #status { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 15px; color: #9ab; text-align: center; pointer-events: none; }
+        #fps { display: none; position: fixed; top: 8px; right: 10px; font: 12px ui-monospace, monospace; color: #7f7; background: rgba(0,0,0,0.55); padding: 2px 6px; border-radius: 3px; pointer-events: none; }
+        #log-container { position: fixed; left: 0; right: 0; bottom: 0; height: 30vh; background: rgba(16,16,16,0.92); border-top: 1px solid #333; overflow-y: scroll; padding: 6px 10px; font: 11px ui-monospace, monospace; display: none; pointer-events: none; }
+        #resbtn { position: fixed; right: 8px; bottom: 8px; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 13px; background: rgba(20,20,24,0.55); color: #cde; font: 15px/26px system-ui, sans-serif; text-align: center; cursor: pointer; opacity: 0.28; transition: opacity .15s; z-index: 5; display: none; }
+        #resbtn:hover, #resbtn:focus-visible, body.respanel #resbtn { opacity: 0.95; outline: none; }
+        #respanel { position: fixed; right: 8px; bottom: 40px; min-width: 210px; padding: 10px 12px; background: rgba(18,18,22,0.94); border: 1px solid #3a3f4a; border-radius: 8px; font: 12px system-ui, sans-serif; color: #cfd6e0; display: none; z-index: 6; }
+        body.respanel #respanel { display: block; }
+        #respanel label { display: block; margin-bottom: 5px; font-weight: 600; }
+        #respanel select { width: 100%; padding: 4px; background: #23262d; color: #e6ebf2; border: 1px solid #454b57; border-radius: 4px; font: inherit; }
+        #respanel .hint { margin-top: 7px; color: #8d97a6; line-height: 1.35; }
+        body.dev #log-container { display: block; }
+        body.dev #fps { display: block; }
+        .log-line { margin: 1px 0; white-space: pre-wrap; }
+        .log-err { color: #f66; }
+        .log-info { color: #8bf; }
+    </style>
+  <!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "ba7e8d1adbd942c7abd27e23c08776ea"}'></script><!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+    <div id="stage"><canvas id="canvas" width="1280" height="720" tabindex="0"></canvas></div>
+    <div id="status">Loading…</div>
+    <div id="fps"></div>
+    <button id="resbtn" type="button" aria-label="Resolution" title="Resolution (F8). Higher = sharper but slower.">&#9881;</button>
+    <div id="respanel" role="dialog" aria-label="Resolution">
+        <label for="ressel">Resolution</label>
+        <select id="ressel" title="Render resolution. Higher = sharper but slower (software renderer); the game restarts when you change it."></select>
+        <div class="hint">Higher = sharper but slower. Changing it restarts the game.</div>
+    </div>
+    <div id="log-container"></div>
+    <script>
+        const params = new URLSearchParams(location.search);
+        // Debug switch: ?debug=1 (alias ?dev=1) shows the log panel, mirrors wasm stdout/stderr and page/worker logs to the
+        // console. Without it the page and the worker never write to the console.
+        const on = (k) => params.has(k) && params.get(k) !== '0';
+        const dev = on('debug') || on('dev');
+        // Page config comes from page.json beside this file (written by the stage step): `title`, and `credit`
+        // {text, link_text, url, corner?}. The credit is NOT DOM: the guest rasterises it into the frame (glsoft.c) from
+        // env YUKI_CREDIT_TEXT / YUKI_CREDIT_LINK / YUKI_CREDIT_CORNER, and the page only hit-tests clicks on the link
+        // line's rectangle (published by the guest in the input SAB, Int32 [67..72] = x, y, w, h, fb_w, fb_h).
+        const PAGE = { title: 'Game', credit: null, packs: null, resolution: null };
+        const pageReady = fetch('page.json').then((r) => r.ok ? r.json() : null).catch(() => null).then((j) => {
+            if (j && typeof j === 'object') { if (j.title) PAGE.title = String(j.title); if (j.credit && typeof j.credit === 'object') PAGE.credit = j.credit; if (j.packs && typeof j.packs === 'object' && j.packs.index) PAGE.packs = j.packs; if (j.resolution && typeof j.resolution === 'object') PAGE.resolution = j.resolution; }
+            document.title = PAGE.title;
+        });
+        if (dev) document.body.classList.add('dev');
+        window.yuki_logs = [];
+        window.yuki_status = 'starting';
+        window.yuki_boot_done = false;
+        window.yuki_frames = 0;
+
+        const container = document.getElementById('log-container');
+        const statusEl = document.getElementById('status');
+        const fpsEl = document.getElementById('fps');
+        const canvas = document.getElementById('canvas');
+        canvas.addEventListener('pointerdown', () => canvas.classList.add('playing'), { once: true });   // hide the system cursor only once the game runs (it draws its own)
+        const ctx = canvas.getContext('2d', { alpha: false });
+        function fitCanvas() {
+            const ar = canvas.width / canvas.height;
+            const w = Math.min(window.innerWidth, window.innerHeight * ar);
+            canvas.style.width = w + 'px'; canvas.style.height = (w / ar) + 'px';
+        }
+        window.addEventListener('resize', fitCanvas);
+
+
+        let logCount = 0;
+        function addLog(text, isErr) {
+            window.yuki_logs.push(text);
+            if (window.yuki_logs.length > 3000) window.yuki_logs.shift();
+            if (!dev) return;
+            console.log(text);
+            logCount++;
+            const keep = isErr || logCount <= 200 || (logCount & 0x1f) === 0;
+            if (!keep) return;
+            const el = document.createElement('div');
+            el.className = 'log-line ' + (isErr ? 'log-err' : 'log-info');
+            el.textContent = text;
+            container.appendChild(el);
+            while (container.children.length > 200) container.removeChild(container.firstChild);
+            if ((logCount & 0x0f) === 0) container.scrollTop = container.scrollHeight;
+        }
+
+        let fpsFrames = 0, fpsT0 = performance.now();
+        function frameDone() {
+            window.yuki_frames++;
+            fpsFrames++;
+            if (statusEl.style.display !== 'none') statusEl.style.display = 'none';
+            const now = performance.now();
+            if (now - fpsT0 >= 500) {
+                fpsEl.textContent = (fpsFrames * 1000 / (now - fpsT0)).toFixed(1) + ' FPS';
+                fpsFrames = 0; fpsT0 = now;
+            }
+        }
+
+        // ---- preflight: say what is missing instead of a blank page ----
+        const ISOLATION_HINT = ' (page is not cross-origin isolated: threaded builds need COOP: same-origin + COEP: require-corp; use `build.py serve`)';
+        function showFatal(msg) {
+            if (!self.crossOriginIsolated) msg += ISOLATION_HINT;
+            statusEl.style.display = '';
+            statusEl.style.color = '#f88';
+            statusEl.textContent = msg;
+            window.yuki_status = 'error: ' + msg;
+            addLog('[main] ' + msg, true);
+        }
+        function preflight() {
+            const miss = [];
+            if (typeof WebAssembly === 'undefined') miss.push('WebAssembly');
+            if (typeof Worker === 'undefined') miss.push('Web Workers');
+            return miss;
+        }
+        const missing = preflight();
+        if (missing.length) { showFatal('This browser/host cannot run the game. Missing: ' + missing.join(', ')); throw new Error('preflight failed'); }
+        window.addEventListener('unhandledrejection', (e) => addLog('[main] unhandled rejection: ' + ((e.reason && e.reason.message) || e.reason), true));
+
+        // ---- watchdog: no worker heartbeat/frame for a while after boot => show it ----
+        let lastAlive = performance.now(), hungShown = false;
+        window.yuki_hung = false;
+        function alive() { lastAlive = performance.now(); if (hungShown) { hungShown = false; window.yuki_hung = false; if (window.yuki_frames > 0) statusEl.style.display = 'none'; } }
+        setInterval(() => {
+            if (document.hidden) return;
+            if (!window.yuki_boot_done && window.yuki_status !== 'booting') return;
+            const idle = performance.now() - lastAlive;
+            if (idle > 20000 && !hungShown) {
+                hungShown = true; window.yuki_hung = true;
+                statusEl.style.display = ''; statusEl.style.color = '#fc6';
+                statusEl.textContent = 'The game has not responded for ' + Math.round(idle / 1000) + 's (busy or hung). Last status: ' + window.yuki_status;
+                addLog('[main] watchdog: no worker heartbeat for ' + Math.round(idle / 1000) + 's, status=' + window.yuki_status, true);
+            }
+        }, 2000);
+
+        // Audio: the guest mixes to 48 kHz stereo float and copies it into this SharedArrayBuffer ring (wasm memory itself is
+        // not shared). Layout (audio_worklet.js 'yuki-out'): Int32 [0]=write frames, [1]=read frames, [2]=rate, [3]=capacity
+        // (power of two), then capacity x {L,R} Float32 from byte 16. The AudioContext is created/resumed on the first user
+        // gesture (autoplay policy); until then the guest keeps mixing in real time and drops what nobody consumes.
+        const AUD_CAP = 16384;
+        const audSab = (typeof SharedArrayBuffer !== 'undefined') ? new SharedArrayBuffer(16 + AUD_CAP * 8) : null;
+        if (audSab) { const h = new Int32Array(audSab, 0, 4); h[2] = 48000; h[3] = AUD_CAP; }
+        let audioInfo = audSab ? { buf: audSab, addr: 0 } : null, audioCtx = null, audioStarting = false;
+        window.yuki_audio = { state: 'idle', frames: 0, nz: 0, starved: 0, fill: 0 };
+        async function ensureAudio() {
+            if (audioCtx) { if (audioCtx.state === 'suspended' || audioCtx.state === 'interrupted') audioCtx.resume().catch(() => {}); return; }
+            if (!audioInfo || audioStarting) return;
+            audioStarting = true;
+            try {
+                audioCtx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
+                await audioCtx.audioWorklet.addModule('audio_worklet.js');
+                const node = new AudioWorkletNode(audioCtx, 'yuki-out', { numberOfInputs: 0, outputChannelCount: [2], processorOptions: { buf: audioInfo.buf, addr: audioInfo.addr } });
+                node.port.onmessage = (e) => { Object.assign(window.yuki_audio, e.data); };
+                if (dev) {   // debug hook (?debug=1 only): RMS of what is actually sent to the destination
+                    const an = audioCtx.createAnalyser(); an.fftSize = 2048; node.connect(an); an.connect(audioCtx.destination);
+                    const buf = new Float32Array(an.fftSize), d = window.yuki_audio_dbg = { rms: 0, rmsMax: 0, samples: 0, nonzero: 0 };
+                    setInterval(() => { an.getFloatTimeDomainData(buf); let s = 0; for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i]; d.rms = Math.sqrt(s / buf.length); d.samples++; if (d.rms > 1e-5) d.nonzero++; if (d.rms > d.rmsMax) d.rmsMax = d.rms; }, 50);
+                } else node.connect(audioCtx.destination);
+                audioCtx.onstatechange = () => { window.yuki_audio.state = audioCtx.state; };
+                await audioCtx.resume();
+                window.yuki_audio.state = audioCtx.state;
+            } catch (err) {
+                window.yuki_audio.state = 'error: ' + err;
+                audioCtx = null;
+            }
+            audioStarting = false;
+        }
+        for (const t of ['pointerdown', 'keydown', 'touchstart']) window.addEventListener(t, ensureAudio, { capture: true });
+        function resumed() { if (document.hidden) return; lastAlive = performance.now(); if (audioCtx) ensureAudio(); }
+        document.addEventListener('visibilitychange', resumed);
+        window.addEventListener('focus', resumed);
+
+        const worker = new Worker('worker.js');
+        // ---- save persistence (see tools/patch_saves.py): worker posts changed files, we keep them in IndexedDB ----
+        const SAVEDB = 'yuki-saves:' + location.pathname;
+        const saveDb = () => new Promise((res, rej) => { const q = indexedDB.open(SAVEDB, 1); q.onupgradeneeded = () => q.result.createObjectStore('f'); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+        const loadSaves = async () => { try { const db = await saveDb(); return await new Promise((res) => { const out = []; const r = db.transaction('f').objectStore('f').openCursor(); r.onsuccess = () => { const c = r.result; if (c) { out.push({ path: c.key, data: c.value }); c.continue(); } else res(out); }; r.onerror = () => res([]); }); } catch (e) { return []; } };
+        const storeSaves = async (files) => { try { const db = await saveDb(); const tx = db.transaction('f', 'readwrite'); for (const f of files) tx.objectStore('f').put(f.data, f.path); } catch (e) {} };
+        worker.onmessage = function(e) {
+            const data = e.data;
+            alive();
+            if (data.type === 'save') { storeSaves(data.files); return; }
+            if (data.type === 'audio') { if (!audSab) audioInfo = data; return; }
+            if (data.type === 'heartbeat') {
+                return;
+            } else if (data.type === 'fatal') {
+                showFatal(data.text);
+            } else if (data.type === 'bitmap') {
+                const b = data.bmp;
+                if (document.hidden) { b.close(); return; }
+                if (canvas.width !== b.width) canvas.width = b.width;
+                if (canvas.height !== b.height) canvas.height = b.height;
+                fitCanvas();
+                ctx.drawImage(b, 0, 0);
+                b.close();
+                frameDone();
+            } else if (data.type === 'frame') {
+                if (canvas.width !== data.w) canvas.width = data.w;
+                if (canvas.height !== data.h) canvas.height = data.h;
+                fitCanvas();
+                const img = new ImageData(new Uint8ClampedArray(data.rgba), data.w, data.h);
+                ctx.putImageData(img, 0, 0);
+                frameDone();
+            } else if (data.type === 'log') {
+                addLog(data.text, data.isErr);
+            } else if (data.type === 'status') {
+                if (window.yuki_frames === 0) statusEl.textContent = data.text;
+                window.yuki_status = data.text;
+            } else if (data.type === 'boot_started') {
+                window.yuki_status = 'booting';
+                wasmReady = true; if (packPump) packPump();
+            } else if (data.type === 'boot_completed') {
+                window.yuki_status = 'running';
+                window.yuki_boot_done = true;
+            }
+        };
+        worker.onerror = function(err) {
+            showFatal('Worker error: ' + (err.message || 'failed to start (check that worker.js and the .wasm were served)'));
+        };
+        worker.onmessageerror = function() { addLog('[main] worker message could not be deserialized', true); };
+
+        // Input transport: a SharedArrayBuffer, because the guest's game loop blocks the worker's event
+        // loop (postMessage'd input would never be delivered while the game runs). Layout (see
+        // runtime/guest/input.c): bytes 0..255 key state; Int32 [64]=write idx, [65]=read idx,
+        // [66]=cursor-locked flag (guest -> page), event ring at [80] = 256 x {type,a,b,c}.
+        const SAB_BYTES = (80 + 256 * 4) * 4;
+        const inSab = (typeof SharedArrayBuffer !== 'undefined') ? new SharedArrayBuffer(SAB_BYTES) : null;
+        const keyView = inSab ? new Uint8Array(inSab, 0, 256) : null;
+        const inI32 = inSab ? new Int32Array(inSab) : null;
+        function pushEv(t, a, b, c) {
+            if (!inI32) return;
+            const wr = Atomics.load(inI32, 64);
+            if (wr - Atomics.load(inI32, 65) >= 256) return;          // full: drop
+            const s = 80 + ((wr & 255) << 2);
+            inI32[s] = t; inI32[s + 1] = a | 0; inI32[s + 2] = b | 0; inI32[s + 3] = c | 0;
+            Atomics.store(inI32, 64, wr + 1);
+        }
+        const releaseTimers = {};
+        function setKey(vk, down) {
+            if (!keyView || vk < 0 || vk > 255) return;
+            clearTimeout(releaseTimers[vk]);
+            if (down) { keyView[vk] = 1; return; }
+            releaseTimers[vk] = setTimeout(() => { keyView[vk] = 0; }, 90);   // brief hold for xinput polling
+        }
+        function key(e, down) {
+            if (e.target && e.target.closest && e.target.closest('#respanel, #resbtn')) return;   // the resolution control does not feed the guest
+            if (e.repeat && down) { pushEv(1, e.keyCode, 0, 0); return; }     // auto-repeat => repeated WM_KEYDOWN
+            setKey(e.keyCode, down);
+            pushEv(down ? 1 : 2, e.keyCode, 0, 0);
+            if (down && e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey) pushEv(3, e.key.charCodeAt(0), 0, 0);
+            if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','Tab','Backspace'].includes(e.key)) e.preventDefault();
+        }
+        window.addEventListener('keydown', (e) => key(e, true));
+        window.addEventListener('keyup', (e) => key(e, false));
+        window.addEventListener('blur', () => { if (keyView) keyView.fill(0); });
+
+        // Mouse: the position is sent normalised (0..65535) over the canvas' CSS box (event 9), so CSS scaling,
+        // devicePixelRatio and the guest framebuffer size cancel out; the guest multiplies by its client size so
+        // the full canvas maps 1:1 to guest 0..W-1 x 0..H-1. When the game hides and clips the cursor (flag [66]) a
+        // click requests pointer lock and relative motion (scaled to canvas pixels) is sent instead.
+        function normXY(e) {
+            const r = canvas.getBoundingClientRect();
+            const f = (v, lo, sz) => Math.max(0, Math.min(65535, Math.round((v - lo) / sz * 65536 - 0.5)));
+            return [f(e.clientX, r.left, r.width), f(e.clientY, r.top, r.height)];
+        }
+        const relativeMouse = (typeof PAGE !== "undefined") && PAGE.mouse === "relative";
+        const locked = () => relativeMouse && document.pointerLockElement === canvas;
+        // Credit link hit-test (the credit is canvas pixels drawn by the guest; rect published in inI32[67..72]).
+        const creditUrl = () => { const u = PAGE.credit && PAGE.credit.url; return (typeof u === 'string' && /^https?:\/\//i.test(u)) ? u : null; };
+        function inCredit(e) {
+            if (!inI32 || locked() || !creditUrl()) return false;
+            const w = Atomics.load(inI32, 69), h = Atomics.load(inI32, 70), fw = Atomics.load(inI32, 71), fh = Atomics.load(inI32, 72);
+            if (w <= 0 || h <= 0 || fw <= 0 || fh <= 0) return false;
+            const r = canvas.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * fw, y = (e.clientY - r.top) / r.height * fh;
+            const x0 = Atomics.load(inI32, 67), y0 = Atomics.load(inI32, 68);
+            return x >= x0 - 2 && x <= x0 + w + 2 && y >= y0 - 2 && y <= y0 + h + 2;
+        }
+        let swallow = false;
+        window.addEventListener('mousemove', (e) => {
+            if (locked()) { const r = canvas.getBoundingClientRect(); pushEv(8, e.movementX * canvas.width / r.width, e.movementY * canvas.height / r.height, 0); }
+            else { const [x, y] = normXY(e); pushEv(9, x, y, 0); if (e.target === canvas) canvas.style.cursor = inCredit(e) ? 'pointer' : ''; }
+        });
+        let dragging = false;
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 0 && inCredit(e)) { swallow = true; e.preventDefault(); return; }   // credit click: the guest never sees it
+            canvas.focus(); dragging = true;
+            if (relativeMouse && inI32 && Atomics.load(inI32, 66) && !locked()) { canvas.requestPointerLock(); }
+            if (!locked()) { const [x, y] = normXY(e); pushEv(9, x, y, 0); }
+            pushEv(5, e.button === 2 ? 1 : e.button === 1 ? 2 : 0, 0, 0); e.preventDefault();
+        });
+        window.addEventListener('mouseup', (e) => { if (swallow && e.button === 0) { swallow = false; if (inCredit(e)) window.open(creditUrl(), '_blank', 'noopener,noreferrer'); return; } dragging = false; pushEv(6, e.button === 2 ? 1 : e.button === 1 ? 2 : 0, 0, 0); });
+        canvas.addEventListener('wheel', (e) => { pushEv(7, e.deltaY < 0 ? 120 : -120, 0, 0); e.preventDefault(); }, { passive: false });
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        canvas.addEventListener('click', () => canvas.focus());
+
+        const env = Object.fromEntries(params);
+        delete env.dev; delete env.debug; delete env.packs; delete env.res;
+        // Render resolution (page.json "resolution": {default, presets, patch}). The guest renders at config.lua width/height, so a size
+        // change = the worker rewrites those values (resolution.patch, {w}/{h} placeholders) before staging the config, i.e. a restart.
+        // Order: ?res=WxH (or auto) > localStorage 'yuki_res' > page default. Mouse is normalised and the credit rect is published in
+        // framebuffer pixels, so nothing else depends on the size.
+        const RES = { key: '', size: null, cfg: null };
+        const DEFAULT_PRESETS = ['640x360', '960x540', '1024x600', '1280x720', '1600x900', '1920x1080'];
+        function parseRes(v) {
+            const m = /^(\d{3,4})x(\d{3,4})$/i.exec(String(v == null ? '' : v).trim());
+            if (!m) return null;
+            const w = +m[1], h = +m[2];
+            return (w < 800 || h < 450 || w > 3840 || h > 2160)   // below 800x450 this game keeps a 640x480 framebuffer (client size and frame disagree)
+                 ? null : [w & ~1, h & ~1];
+        }
+        function autoRes() { return [Math.max(800, Math.min(window.innerWidth, 1920) & ~1), Math.max(450, Math.min(window.innerHeight, 1080) & ~1)]; }
+        function chooseRes() {
+            const cfg = PAGE.resolution;
+            if (!cfg || !cfg.patch) return;
+            RES.cfg = cfg;
+            let stored = null;
+            try { stored = localStorage.getItem('yuki_res'); } catch (e) {}
+            for (const v of [params.get('res'), stored, cfg.default]) {
+                if (v == null) continue;
+                if (String(v).toLowerCase() === 'auto') { RES.key = 'auto'; RES.size = autoRes(); return; }
+                const p = parseRes(v);
+                if (p) { RES.key = p[0] + 'x' + p[1]; RES.size = p; return; }
+            }
+        }
+        function buildResUI() {
+            const btn = document.getElementById('resbtn'), panel = document.getElementById('respanel'), sel = document.getElementById('ressel');
+            if (!RES.cfg || !RES.size) return;
+            btn.style.display = 'block';
+            const presets = (Array.isArray(RES.cfg.presets) && RES.cfg.presets.length ? RES.cfg.presets : DEFAULT_PRESETS).filter((v) => parseRes(v));
+            const opts = presets.slice();
+            if (RES.cfg.auto !== false) opts.push('auto');
+            if (RES.key !== 'auto' && !opts.includes(RES.key)) opts.push(RES.key);
+            for (const v of opts) {
+                const o = document.createElement('option');
+                o.value = v;
+                o.textContent = v === 'auto' ? 'Auto (fit window, max 1920x1080)' : v + (v === String(RES.cfg.default) ? ' (default)' : '');
+                sel.appendChild(o);
+            }
+            sel.value = RES.key;
+            const toggle = (on) => { document.body.classList.toggle('respanel', on === undefined ? !document.body.classList.contains('respanel') : on); if (document.body.classList.contains('respanel')) sel.focus(); else canvas.focus(); };
+            btn.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'F8') { e.preventDefault(); e.stopImmediatePropagation(); toggle(); }
+                else if (e.key === 'Escape' && document.body.classList.contains('respanel')) { e.preventDefault(); e.stopImmediatePropagation(); toggle(false); }
+            }, true);
+            sel.addEventListener('change', () => {
+                let saved = false;
+                try { localStorage.setItem('yuki_res', sel.value); saved = localStorage.getItem('yuki_res') === sel.value; } catch (e) {}
+                const u = new URL(location.href);
+                if (saved) u.searchParams.delete('res'); else u.searchParams.set('res', sel.value);   // static hosts (Cloudflare Pages) can 404 on any query string: keep the URL clean when localStorage works
+                if (u.href === location.href) location.reload(); else location.href = u.toString();     // restart: the worker reads the size once at start
+            });
+        }
+        // Asset packs (page.json "packs", yukicomp/webpacks.py): fetch the index, allocate one SharedArrayBuffer for all packs and
+        // download them in the background (eager packs first, then "next") with a few parallel requests, writing straight into it.
+        // The worker (blocked by the guest, it cannot await) reads from there; per-pack state in ctl: 0 idle, 1 page loading,
+        // 2 ready, 3 worker loading; ctl[n + i] = bytes received so far (stall watchdog). ?packs=0 turns packs off (per-file mode).
+        window.yuki_packs = { enabled: false, loaded: 0, failed: 0, bytes: 0, total: 0, t_first: 0, t_eager: 0 };
+        let PACKS = null, packPump = null, wasmReady = false;   // the first phase (boot) is fetched at once; the rest waits for the worker's boot_started so the 34 MB wasm gets the bandwidth first
+        async function setupPacks() {
+            if (!PAGE.packs || params.get('packs') === '0') return;
+            try {
+                const r = await fetch(PAGE.packs.index);
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const index = await r.json(), list = index.packs, n = list.length;
+                const sab = typeof SharedArrayBuffer !== 'undefined';
+                const off = []; let total = 0;
+                for (const p of list) { if (sab && !p.range) { off.push(total); total += p.size; } else off.push(-1); }
+                const ctl = sab ? new SharedArrayBuffer(4 * 2 * n) : null, data = (sab && total > 0) ? new SharedArrayBuffer(total) : null;
+                PACKS = { index, ctl, data, off };
+                const st = window.yuki_packs; st.enabled = true; st.total = list.length;
+                if (!ctl || !data) return;
+                const C = new Int32Array(ctl), t0 = performance.now();
+                const order = ['eager', 'next'].flatMap((k) => list.filter((p) => off[p.id] >= 0 && p.prefetch === k));
+                const eagerLeft = new Set(order.filter((p) => p.prefetch === 'eager').map((p) => p.id));
+                let next = 0, active = 0;
+                const load = async (p) => {
+                    try {
+                        const resp = await fetch(p.url);
+                        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                        const view = new Uint8Array(data, off[p.id], p.size);
+                        let pos = 0;
+                        if (resp.body && resp.body.getReader) {
+                            const rd = resp.body.getReader();
+                            for (;;) {
+                                const { done, value } = await rd.read();
+                                if (done) break;
+                                if (pos + value.length > p.size) throw new Error('pack too large');
+                                view.set(value, pos); pos += value.length; Atomics.store(C, n + p.id, pos);
+                            }
+                        } else { const b = new Uint8Array(await resp.arrayBuffer()); if (b.length <= p.size) { view.set(b); pos = b.length; } }
+                        if (pos !== p.size) throw new Error('pack size ' + pos + ' != ' + p.size);
+                        if (Atomics.compareExchange(C, p.id, 1, 2) === 1) Atomics.notify(C, p.id);
+                        st.loaded++; st.bytes += p.size;
+                        if (!st.t_first) st.t_first = Math.round(performance.now() - t0);
+                        eagerLeft.delete(p.id);
+                        if (!eagerLeft.size && !st.t_eager) st.t_eager = Math.round(performance.now() - t0);
+                    } catch (e) {
+                        st.failed++;
+                        Atomics.compareExchange(C, p.id, 1, 0);     // the worker fetches it itself when it needs it
+                        addLog('[main] pack prefetch ' + p.name + ' failed: ' + ((e && e.message) || e), true);
+                    }
+                };
+                const pump = () => {
+                    while (active < 6 && next < order.length && (wasmReady || order[next].phase === list[0].phase)) {
+                        const p = order[next++];
+                        if (Atomics.compareExchange(C, p.id, 0, 1) !== 0) continue;   // already taken (worker got there first)
+                        active++; load(p).finally(() => { active--; pump(); });
+                    }
+                };
+                packPump = pump;
+                pump();
+            } catch (e) { PACKS = null; addLog('[main] asset packs unavailable, using per-file loading: ' + ((e && e.message) || e), true); }
+        }
+        // The engine wasm is served as two halves (host file-size limit): fetch both parts and reassemble them in
+        // memory, then transfer the combined buffer to the worker, which instantiates from it (see worker.js).
+        window.yuki_wasm = { bytes: 0, done: false };
+        statusEl.textContent = 'Downloading engine…';
+        const wasmPartsReady = (async () => {
+            const urls = ['yukicomp-lifted.wasm.part1', 'yukicomp-lifted.wasm.part2'];
+            const bufs = await Promise.all(urls.map((u) => fetch(u).then((r) => {
+                if (!r.ok) throw new Error(u + ': HTTP ' + r.status);
+                return r.arrayBuffer();
+            })));
+            const total = bufs.reduce((n, b) => n + b.byteLength, 0);
+            const bytes = new Uint8Array(total);
+            let off = 0;
+            for (const b of bufs) { bytes.set(new Uint8Array(b), off); off += b.byteLength; }
+            window.yuki_wasm.bytes = total; window.yuki_wasm.done = true;
+            return bytes;
+        })();
+        const packsReady = pageReady.then(() => {
+            chooseRes();
+            if (RES.size) { canvas.width = RES.size[0]; canvas.height = RES.size[1]; fitCanvas(); window.yuki_res = { key: RES.key, w: RES.size[0], h: RES.size[1] }; }
+            buildResUI();
+            return setupPacks();
+        });
+        // Credit text for the guest (page.json), overridable from the query (?YUKI_CREDIT_TEXT=&YUKI_CREDIT_LINK= disables it).
+        packsReady.then(() => {
+            if (PAGE.env && typeof PAGE.env === 'object') for (const k of Object.keys(PAGE.env)) if (!(k in env)) env[k] = String(PAGE.env[k]);
+            const c = PAGE.credit;
+            if (c) {
+                if (c.text && !('YUKI_CREDIT_TEXT' in env)) env.YUKI_CREDIT_TEXT = String(c.text);
+                if (c.link_text && !('YUKI_CREDIT_LINK' in env)) env.YUKI_CREDIT_LINK = String(c.link_text);
+                if (c.corner && !('YUKI_CREDIT_CORNER' in env)) env.YUKI_CREDIT_CORNER = String(c.corner);
+            }
+            Promise.all([wasmPartsReady, loadSaves()]).then(([bytes, saves]) => {
+                worker.postMessage({ type: 'start', saves, canvas: null, dev, env, keys: inSab, audio: audSab, packs: PACKS, res: RES.size, resPatch: RES.size ? RES.cfg.patch : null, wasmBinary: bytes.buffer }, [bytes.buffer]);
+            }, (err) => {
+                showFatal('Engine download failed: ' + ((err && err.message) || err) + ' (serve yukicomp-lifted.wasm.part1 and .part2 beside this page)');
+            });
+        });
+    </script>
+</body>
+</html>

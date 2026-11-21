@@ -1,0 +1,38 @@
+{
+ "title": "Angry Birds Seasons",
+ "credit": {
+  "text": "Port By Reeyuki",
+  "link_text": "reeyuki.neocities.org",
+  "url": "https://reeyuki.neocities.org",
+  "corner": "tl"
+ },
+ "packs": {
+  "target_mb": 4,
+  "boot_mb": 4,
+  "index": "packs/index.497e9620f4.json",
+  "count": 25,
+  "bytes": 89336560
+ },
+ "resolution": {
+  "default": "1024x768",
+  "presets": [
+   "1024x768"
+  ],
+  "auto": true,
+  "patch": {
+   "config.lua": [
+    [
+     "width = 1024",
+     "width = {w}"
+    ],
+    [
+     "height = 768",
+     "height = {h}"
+    ]
+   ]
+  }
+ },
+ "env": {
+  "YUKI_FAKE_EPOCH": "1417392000"
+ }
+}
