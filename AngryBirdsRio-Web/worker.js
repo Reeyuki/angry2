@@ -182,6 +182,52 @@ function makePacks(cfg, dev, logFile, log) {
     };
 }
 
+
+// Frame pacing + backpressure + leak-free present. Per-frame OffscreenCanvas.transferToImageBitmap() makes Chrome's GPU process
+// grow ~100+ MB/s (even with close()), which freezes the whole PC. Instead copy each frame into ONE reused SharedArrayBuffer
+// and let the page paint it; max 1 frame in flight, capped at 60 fps.
+self.__yukiSent = 0; self.__yukiLast = 0; self.__yp = null; self.__ypOff = (typeof SharedArrayBuffer === 'undefined');
+self.__yukiGate = function (maxInflight) {
+    const i = self.__yuki_in_i32;
+    if (!i) return;
+    let spins = 0;
+    while ((self.__yukiSent - Atomics.load(i, 73)) >= (maxInflight || 1) && spins++ < 50) Atomics.wait(i, 73, Atomics.load(i, 73), 4);
+    const w = self.__yukiLast + 1000 / 60 - performance.now();
+    if (w > 1) Atomics.wait(i, 74, 0, w);
+    self.__yukiLast = performance.now();
+};
+self.__yukiPresent = function () {      // true = handled, false = caller falls back to the bitmap path
+    const c = Module.canvas;
+    if (!c || self.__ypOff || !self.__yuki_in_i32) return false;
+    try {
+        const w = c.width | 0, h = c.height | 0;
+        if (w <= 0 || h <= 0) return true;
+        const t0 = performance.now();
+        self.__yukiGate(2);
+        const t1 = performance.now();
+        let P = self.__yp;
+        if (!P || P.w !== w || P.h !== h) {
+            const cv = new OffscreenCanvas(w, h);
+            const sab = new SharedArrayBuffer(w * h * 8);   // 2 slots: render into one while the page paints the other
+            P = self.__yp = { n: 0, w, h, cx: cv.getContext('2d', { willReadFrequently: true }), sab, u8: new Uint8ClampedArray(sab) };
+        }
+        P.cx.drawImage(c, 0, 0);
+        const slot = (P.n++ & 1) * w * h * 4;
+        P.u8.set(P.cx.getImageData(0, 0, w, h).data, slot);
+        self.postMessage({ type: 'frame2', w, h, sab: P.sab, off: slot });
+        self.__yukiSent++;
+        if (self.__yuki_dev) {          // ?debug=1: where does each frame's time go? (guest = time between presents minus gate wait and copy)
+            const t2 = performance.now(), T = self.__yT || (self.__yT = { n: 0, guest: 0, wait: 0, copy: 0, last: t0, t: t0 });
+            T.guest += (t0 - T.last) - (self.__yTprevOut || 0); T.wait += t1 - t0; T.copy += t2 - t1; T.n++; T.last = t2; self.__yTprevOut = 0;
+            if (T.n >= 120) {
+                self.postMessage({ type: 'log', text: '[perf] ' + (120000 / (t2 - T.t)).toFixed(1) + ' fps | per frame ms: guest ' + (T.guest / 120).toFixed(1) +
+                    ', gate-wait ' + (T.wait / 120).toFixed(1) + ', readback+copy ' + (T.copy / 120).toFixed(1) + ' | ' + w + 'x' + h, isErr: true });
+                T.n = 0; T.guest = T.wait = T.copy = 0; T.t = t2;
+            }
+        }
+        return true;
+    } catch (e) { self.__ypOff = true; return false; }
+};
 self.__yuki_dev = false;
 function postLog(msg, isErr) {
     if (!self.__yuki_dev) return;     // silent unless the page was opened with ?debug=1

@@ -194,6 +194,7 @@
                 showFatal(data.text);
             } else if (data.type === 'bitmap') {
                 const b = data.bmp;
+                if (inI32) { Atomics.add(inI32, 73, 1); Atomics.notify(inI32, 73); }
                 if (document.hidden) { b.close(); return; }
                 if (canvas.width !== b.width) canvas.width = b.width;
                 if (canvas.height !== b.height) canvas.height = b.height;
@@ -201,6 +202,18 @@
                 ctx.drawImage(b, 0, 0);
                 b.close();
                 frameDone();
+            } else if (data.type === 'frame2') {
+                const n = data.w * data.h * 4;
+                if (!document.hidden) {
+                    if (canvas.width !== data.w) canvas.width = data.w;
+                    if (canvas.height !== data.h) canvas.height = data.h;
+                    fitCanvas();
+                    if (!window.__f2 || window.__f2.width !== data.w || window.__f2.height !== data.h) window.__f2 = new ImageData(data.w, data.h);
+                    window.__f2.data.set(new Uint8ClampedArray(data.sab, data.off | 0, n));
+                    ctx.putImageData(window.__f2, 0, 0);
+                    frameDone();
+                }
+                if (inI32) { Atomics.add(inI32, 73, 1); Atomics.notify(inI32, 73); }
             } else if (data.type === 'frame') {
                 if (canvas.width !== data.w) canvas.width = data.w;
                 if (canvas.height !== data.h) canvas.height = data.h;
